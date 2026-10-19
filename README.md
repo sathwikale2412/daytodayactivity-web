@@ -4,7 +4,7 @@ A web conversion of the Android app `daytodayactivity`: a daily task scheduler w
 
 ## Live demo
 
-_Deployed on Vercel — URL added after first deploy._
+https://daytodayactivity-web.vercel.app
 
 ## Features
 
