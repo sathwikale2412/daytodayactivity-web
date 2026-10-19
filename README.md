@@ -6,6 +6,17 @@ A web conversion of the Android app `daytodayactivity`: a daily task scheduler w
 
 https://daytodayactivity-web.vercel.app
 
+### Try it signed in
+
+Open the site, hit **Login / Sign Up**, and use the sandbox account:
+
+| | |
+| --- | --- |
+| Email | `cloudtest@daytoday.app` |
+| Password | `TestPass1234` |
+
+This is a disposable test user holding only sample data — please don't reuse the password anywhere. You can also **Create Account** with your own email; no confirmation link is required, so the account is usable immediately. **Continue as Guest** skips auth entirely and keeps everything in that browser's IndexedDB.
+
 ## Features
 
 - **Scheduler** — live clock, per-day task list, daily-goal progress bar, NOW highlight for in-range tasks, past-due error styling, filters (All / Active Now / Pending / Completed), add/delete tasks with category and start/end time.
