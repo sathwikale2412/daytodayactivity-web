@@ -3,7 +3,7 @@ import { X, Lock, Mail, User, Sparkles, AlertCircle, ArrowRight, Check } from 'l
 import { useAuth } from '../context/AuthContext';
 
 export default function AuthModal({ isOpen, onClose }) {
-  const { login, signup, guestLogin } = useAuth();
+  const { login, signup, cloud } = useAuth();
   
   const [mode, setMode] = useState('login'); // 'login' or 'signup'
   const [email, setEmail] = useState('');
@@ -39,17 +39,9 @@ export default function AuthModal({ isOpen, onClose }) {
     }
   };
 
-  const handleGuestLogin = async () => {
+  const handleContinueGuest = () => {
     setError('');
-    setLoading(true);
-    try {
-      await guestLogin();
-      onClose();
-    } catch (err) {
-      setError('Guest login failed: ' + err.message);
-    } finally {
-      setLoading(false);
-    }
+    onClose();
   };
 
   return (
@@ -180,17 +172,19 @@ export default function AuthModal({ isOpen, onClose }) {
           </button>
         </form>
 
-        {/* 1-Click Guest Exploration */}
+        {/* Guest exploration */}
         <div className="pt-2 border-t border-white/10 text-center">
-          <p className="text-[11px] text-white/40 mb-2">Want to try without typing?</p>
+          <p className="text-[11px] text-white/40 mb-2">
+            {cloud ? 'Sign in to sync your data across every device.' : 'Or keep using this device only.'}
+          </p>
           <button
             type="button"
-            onClick={handleGuestLogin}
+            onClick={handleContinueGuest}
             disabled={loading}
             className="w-full py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white/80 hover:text-white text-xs font-semibold transition-colors flex items-center justify-center gap-2"
           >
             <Sparkles className="w-3.5 h-3.5 text-accent-teal" />
-            <span>1-Click Guest Demo Preview</span>
+            <span>Continue as Guest (stays on this device)</span>
           </button>
         </div>
 

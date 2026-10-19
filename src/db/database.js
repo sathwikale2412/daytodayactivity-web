@@ -8,10 +8,14 @@
  * - Support for querying tasks by date, date range (analytics), and user isolation
  */
 
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
+
 const DB_NAME = 'DayToDayActivityDB';
 const DB_VERSION = 1;
 
-class AppDatabase {
+// Local (on-device) store. Used for guest mode and as the fallback when
+// Supabase env vars are not configured. Data here never leaves the browser.
+class LocalDatabase {
   constructor() {
     this.db = null;
     this.ready = this.init();
@@ -595,4 +599,281 @@ class AppDatabase {
   }
 }
 
-export const db = new AppDatabase();
+/**
+ * Cloud store backed by Supabase Postgres. Every method is scoped to the
+ * signed-in user via `user_id` and enforced again by Row Level Security, so
+ * accounts, tasks, routines and analytics follow the user across devices.
+ */
+class CloudDatabase {
+  constructor(client) {
+    this.client = client;
+  }
+
+  // --- mappers (app camelCase <-> db snake_case) ---
+  toTaskRow(t) {
+    return {
+      user_id: t.userId,
+      title: t.title,
+      description: t.description ?? '',
+      date: t.date || new Date().toISOString().split('T')[0],
+      start_time: Number(t.startTime),
+      end_time: Number(t.endTime),
+      is_completed: Boolean(t.isCompleted),
+      category: t.category || 'General'
+    };
+  }
+
+  fromTaskRow(r) {
+    return {
+      id: r.id,
+      userId: r.user_id,
+      title: r.title,
+      description: r.description,
+      date: r.date,
+      startTime: Number(r.start_time),
+      endTime: Number(r.end_time),
+      isCompleted: r.is_completed,
+      category: r.category,
+      createdAt: r.created_at
+    };
+  }
+
+  toRoutineRow(r) {
+    return {
+      user_id: r.userId,
+      title: r.title,
+      start_time_hour: Number(r.startTimeHour),
+      start_time_minute: Number(r.startTimeMinute),
+      end_time_hour: Number(r.endTimeHour),
+      end_time_minute: Number(r.endTimeMinute),
+      category: r.category || 'General'
+    };
+  }
+
+  fromRoutineRow(r) {
+    return {
+      id: r.id,
+      userId: r.user_id,
+      title: r.title,
+      startTimeHour: r.start_time_hour,
+      startTimeMinute: r.start_time_minute,
+      endTimeHour: r.end_time_hour,
+      endTimeMinute: r.end_time_minute,
+      category: r.category
+    };
+  }
+
+  // --- Tasks ---
+  async getTasks(userId, dateStr = null) {
+    let query = this.client.from('tasks').select('*').eq('user_id', userId);
+    if (dateStr) query = query.eq('date', dateStr);
+    const { data, error } = await query.order('start_time', { ascending: true });
+    if (error) throw error;
+    return (data || []).map((r) => this.fromTaskRow(r));
+  }
+
+  async addTask(task) {
+    const { data, error } = await this.client
+      .from('tasks')
+      .insert(this.toTaskRow(task))
+      .select()
+      .single();
+    if (error) throw error;
+    return this.fromTaskRow(data);
+  }
+
+  async updateTask(task) {
+    const row = this.toTaskRow(task);
+    delete row.user_id;
+    const { error } = await this.client.from('tasks').update(row).eq('id', task.id);
+    if (error) throw error;
+    return task;
+  }
+
+  async deleteTask(taskId) {
+    const { error } = await this.client.from('tasks').delete().eq('id', taskId);
+    if (error) throw error;
+    return true;
+  }
+
+  // --- Routines ---
+  async getRoutines(userId) {
+    const { data, error } = await this.client
+      .from('routines')
+      .select('*')
+      .eq('user_id', userId)
+      .order('start_time_hour', { ascending: true })
+      .order('start_time_minute', { ascending: true });
+    if (error) throw error;
+    return (data || []).map((r) => this.fromRoutineRow(r));
+  }
+
+  async addRoutine(routine) {
+    const { data, error } = await this.client
+      .from('routines')
+      .insert(this.toRoutineRow(routine))
+      .select()
+      .single();
+    if (error) throw error;
+    return this.fromRoutineRow(data);
+  }
+
+  async deleteRoutine(routineId) {
+    const { error } = await this.client.from('routines').delete().eq('id', routineId);
+    if (error) throw error;
+    return true;
+  }
+
+  // --- Profile ---
+  async getProfile(userId) {
+    const { data, error } = await this.client
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) {
+      return { userId, name: 'User', dailyGoalCount: 5, soundEnabled: true, notificationsEnabled: true, theme: 'dark' };
+    }
+    return {
+      userId: data.id,
+      name: data.name,
+      dailyGoalCount: data.daily_goal_count,
+      soundEnabled: data.sound_enabled,
+      notificationsEnabled: data.notifications_enabled,
+      theme: data.theme
+    };
+  }
+
+  async updateProfile(userId, profileData) {
+    const current = await this.getProfile(userId);
+    const merged = { ...current, ...profileData };
+    const row = {
+      id: userId,
+      name: merged.name,
+      daily_goal_count: Number(merged.dailyGoalCount) || 5,
+      sound_enabled: Boolean(merged.soundEnabled),
+      notifications_enabled: Boolean(merged.notificationsEnabled),
+      theme: merged.theme || 'dark'
+    };
+    const { error } = await this.client.from('profiles').upsert(row);
+    if (error) throw error;
+    return merged;
+  }
+}
+
+// Shared analytics computation (works on any task list shape).
+function computeWeeklyAnalytics(allTasks) {
+  const today = new Date();
+  const days = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(today.getDate() - i);
+    const dateStr = d.toISOString().split('T')[0];
+    const dayTasks = allTasks.filter((t) => t.date === dateStr);
+    const completed = dayTasks.filter((t) => t.isCompleted).length;
+    const total = dayTasks.length;
+    days.push({
+      date: dateStr,
+      dayName: d.toLocaleDateString(undefined, { weekday: 'short' }),
+      formattedDate: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+      completed,
+      total,
+      rate: total > 0 ? Math.round((completed / total) * 100) : 0
+    });
+  }
+  const totalCreated = allTasks.length;
+  const totalCompleted = allTasks.filter((t) => t.isCompleted).length;
+  return {
+    days,
+    totalCreated,
+    totalCompleted,
+    overallRate: totalCreated > 0 ? Math.round((totalCompleted / totalCreated) * 100) : 0
+  };
+}
+
+const localDb = new LocalDatabase();
+const cloudDb = isSupabaseConfigured ? new CloudDatabase(supabase) : null;
+
+/**
+ * Facade used by the rest of the app. Routes each call to Supabase when there
+ * is an active session, otherwise to the on-device store (guest / dev mode).
+ */
+class DataGateway {
+  async mode() {
+    if (!cloudDb) return 'local';
+    const { data } = await supabase.auth.getSession();
+    return data.session ? 'cloud' : 'local';
+  }
+
+  async active() {
+    return (await this.mode()) === 'cloud' ? cloudDb : localDb;
+  }
+
+  async getTasks(userId, dateStr = null) { return (await this.active()).getTasks(userId, dateStr); }
+  async getAllTasksForUser(userId) { return (await this.active()).getTasks(userId, null); }
+  async addTask(task) { return (await this.active()).addTask(task); }
+  async updateTask(task) { return (await this.active()).updateTask(task); }
+  async deleteTask(taskId) { return (await this.active()).deleteTask(taskId); }
+
+  async getRoutines(userId) { return (await this.active()).getRoutines(userId); }
+  async addRoutine(routine) { return (await this.active()).addRoutine(routine); }
+  async deleteRoutine(routineId) { return (await this.active()).deleteRoutine(routineId); }
+
+  async getProfile(userId) { return (await this.active()).getProfile(userId); }
+  async updateProfile(userId, data) { return (await this.active()).updateProfile(userId, data); }
+
+  async getWeeklyAnalytics(userId) {
+    const tasks = await this.getAllTasksForUser(userId);
+    return computeWeeklyAnalytics(tasks);
+  }
+
+  async exportData(userId) {
+    const [profile, tasks, routines] = await Promise.all([
+      this.getProfile(userId),
+      this.getAllTasksForUser(userId),
+      this.getRoutines(userId)
+    ]);
+    return { version: 1, exportedAt: new Date().toISOString(), profile, tasks, routines };
+  }
+
+  async importData(userId, data) {
+    if (!data || !data.version) throw new Error('Invalid backup file format');
+    if (data.profile) await this.updateProfile(userId, data.profile);
+    if (Array.isArray(data.tasks)) {
+      for (const t of data.tasks) {
+        const { id, ...rest } = t;
+        await this.addTask({ ...rest, userId });
+      }
+    }
+    if (Array.isArray(data.routines)) {
+      for (const r of data.routines) {
+        const { id, ...rest } = r;
+        await this.addRoutine({ ...rest, userId });
+      }
+    }
+    return true;
+  }
+
+  // Local-only auth helpers (used when Supabase is not configured).
+  createUser(opts) { return localDb.createUser(opts); }
+  authenticateUser(email, password) { return localDb.authenticateUser(email, password); }
+  getUserById(id) { return localDb.getUserById(id); }
+}
+
+export const db = new DataGateway();
+export { LocalDatabase };
+
+// Seed default routines for a brand-new cloud user (mirrors local seeding).
+export async function seedDefaultRoutines(userId) {
+  if (!cloudDb) return;
+  const defaults = [
+    { userId, title: 'Morning Exercise & Meditation', startTimeHour: 7, startTimeMinute: 0, endTimeHour: 8, endTimeMinute: 0, category: 'Health' },
+    { userId, title: 'Deep Work Session 1', startTimeHour: 9, startTimeMinute: 30, endTimeHour: 12, endTimeMinute: 0, category: 'Work' },
+    { userId, title: 'Healthy Lunch & Walk', startTimeHour: 12, startTimeMinute: 30, endTimeHour: 13, endTimeMinute: 30, category: 'Health' },
+    { userId, title: 'Project Focus & Code Review', startTimeHour: 14, startTimeMinute: 0, endTimeHour: 17, endTimeMinute: 0, category: 'Work' },
+    { userId, title: 'Evening Reading & Reflection', startTimeHour: 20, startTimeMinute: 30, endTimeHour: 21, endTimeMinute: 30, category: 'Personal' }
+  ];
+  await cloudDb.addRoutine(defaults[0]);
+  for (const r of defaults.slice(1)) await cloudDb.addRoutine(r);
+}
