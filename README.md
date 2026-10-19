@@ -8,14 +8,16 @@ https://daytodayactivity-web.vercel.app
 
 ### Try it signed in
 
-Open the site, hit **Login / Sign Up**, and use the sandbox account:
+Open the site, hit **Login / Sign Up**, then press **Sign in with demo data**. That logs into a sandbox account and seeds a week of tasks and routines, so the scheduler, routine timetable and analytics charts are all populated immediately.
+
+The credentials behind that button are:
 
 | | |
 | --- | --- |
 | Email | `cloudtest@daytoday.app` |
 | Password | `TestPass1234` |
 
-This is a disposable test user holding only sample data — please don't reuse the password anywhere.
+It is a disposable test user holding only sample data — please don't reuse the password anywhere.
 
 To use it as your own tool instead, **Create Account** with your email — Supabase sends one confirmation link, and the account is yours across every device you sign in on. **Continue as Guest** skips auth entirely and keeps everything in that browser's IndexedDB.
 
