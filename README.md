@@ -15,7 +15,9 @@ Open the site, hit **Login / Sign Up**, and use the sandbox account:
 | Email | `cloudtest@daytoday.app` |
 | Password | `TestPass1234` |
 
-This is a disposable test user holding only sample data — please don't reuse the password anywhere. You can also **Create Account** with your own email; no confirmation link is required, so the account is usable immediately. **Continue as Guest** skips auth entirely and keeps everything in that browser's IndexedDB.
+This is a disposable test user holding only sample data — please don't reuse the password anywhere.
+
+To use it as your own tool instead, **Create Account** with your email — Supabase sends one confirmation link, and the account is yours across every device you sign in on. **Continue as Guest** skips auth entirely and keeps everything in that browser's IndexedDB.
 
 ## Features
 
