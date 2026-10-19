@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { db } from './db/database';
 import Navbar from './components/Navbar';
@@ -9,11 +9,12 @@ import AddTaskModal from './components/AddTaskModal';
 import ProfileModal from './components/ProfileModal';
 import AuthModal from './components/AuthModal';
 import { Sparkles, ArrowRight } from 'lucide-react';
+import { todayStr } from './lib/date';
 
 function MainApp() {
   const { user, profile, loading } = useAuth();
   const [activeTab, setActiveTab] = useState('scheduler'); // 'scheduler', 'routine', 'analytics'
-  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [selectedDate, setSelectedDate] = useState(todayStr);
   const [currentTime, setCurrentTime] = useState(Date.now());
   
   // Data states
@@ -73,6 +74,13 @@ function MainApp() {
     loadRoutines();
     loadAnalytics();
   }, [loadTasks, loadRoutines, loadAnalytics]);
+
+  // AuthModal keeps the onClose prop from before sign-in, so a refresh called
+  // after its async demo flow would still target the guest user id.
+  const refreshAllRef = useRef(refreshAll);
+  useEffect(() => {
+    refreshAllRef.current = refreshAll;
+  });
 
   useEffect(() => {
     refreshAll();
@@ -243,7 +251,10 @@ function MainApp() {
 
       <AuthModal
         isOpen={isAuthOpen}
-        onClose={() => setIsAuthOpen(false)}
+        onClose={() => {
+          setIsAuthOpen(false);
+          refreshAllRef.current();
+        }}
       />
 
     </div>

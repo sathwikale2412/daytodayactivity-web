@@ -19,6 +19,7 @@ import confetti from 'canvas-confetti';
 import GlassCard from './GlassCard';
 import { soundService } from '../services/sound';
 import { notificationService } from '../services/notifications';
+import { toDateStr, todayStr } from '../lib/date';
 
 export default function SchedulerScreen({
   tasks,
@@ -77,14 +78,14 @@ export default function SchedulerScreen({
 
   // Date Navigation Helpers
   const isToday = useMemo(() => {
-    const todayStr = new Date().toISOString().split('T')[0];
-    return selectedDate === todayStr;
+    return selectedDate === todayStr();
   }, [selectedDate]);
 
   const changeDateBy = (days) => {
-    const d = new Date(selectedDate);
-    d.setDate(d.getDate() + days);
-    setSelectedDate(d.toISOString().split('T')[0]);
+    const [y, m, d] = selectedDate.split('-').map(Number);
+    const next = new Date(y, m - 1, d);
+    next.setDate(next.getDate() + days);
+    setSelectedDate(toDateStr(next));
   };
 
   const formattedSelectedDate = useMemo(() => {
@@ -219,7 +220,7 @@ export default function SchedulerScreen({
 
             {!isToday && (
               <button
-                onClick={() => setSelectedDate(new Date().toISOString().split('T')[0])}
+                onClick={() => setSelectedDate(todayStr())}
                 className="w-full mt-2 py-1.5 rounded-xl bg-primary/20 hover:bg-primary/30 text-accent-teal text-xs font-semibold transition-colors"
               >
                 Jump to Today

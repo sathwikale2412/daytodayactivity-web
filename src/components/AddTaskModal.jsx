@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { X, Clock, Calendar, Tag, FileText, Check } from 'lucide-react';
+import { todayStr } from '../lib/date';
 
 export default function AddTaskModal({ isOpen, onClose, onAddTask, defaultDate }) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [date, setDate] = useState(defaultDate || new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(defaultDate || todayStr());
   const [startTimeStr, setStartTimeStr] = useState('09:00');
   const [endTimeStr, setEndTimeStr] = useState('10:00');
   const [category, setCategory] = useState('General');

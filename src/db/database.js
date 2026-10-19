@@ -9,6 +9,7 @@
  */
 
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { toDateStr, todayStr } from '../lib/date';
 
 const DB_NAME = 'DayToDayActivityDB';
 const DB_VERSION = 1;
@@ -149,7 +150,7 @@ class LocalDatabase {
           defaultRoutines.forEach(r => routineStore.add(r));
 
           // Seed sample tasks for today
-          const todayStr = new Date().toISOString().split('T')[0];
+          const sampleDate = todayStr();
           const taskStore = tx.objectStore('tasks');
           const now = new Date();
           const currentHour = now.getHours();
@@ -162,7 +163,7 @@ class LocalDatabase {
               startTime: new Date().setHours(Math.max(0, currentHour - 1), 0, 0, 0),
               endTime: new Date().setHours(Math.max(1, currentHour), 0, 0, 0),
               isCompleted: true,
-              date: todayStr,
+              date: sampleDate,
               category: 'Routine'
             },
             {
@@ -172,7 +173,7 @@ class LocalDatabase {
               startTime: new Date().setHours(currentHour, 0, 0, 0),
               endTime: new Date().setHours(currentHour + 1, 30, 0, 0),
               isCompleted: false,
-              date: todayStr,
+              date: sampleDate,
               category: 'Work'
             },
             {
@@ -182,7 +183,7 @@ class LocalDatabase {
               startTime: new Date().setHours(21, 0, 0, 0),
               endTime: new Date().setHours(22, 0, 0, 0),
               isCompleted: false,
-              date: todayStr,
+              date: sampleDate,
               category: 'Personal'
             }
           ];
@@ -367,7 +368,7 @@ class LocalDatabase {
       startTime: Number(task.startTime),
       endTime: Number(task.endTime),
       isCompleted: Boolean(task.isCompleted),
-      date: task.date || new Date().toISOString().split('T')[0],
+      date: task.date || todayStr(),
       category: task.category || 'General',
       createdAt: Date.now()
     };
@@ -511,7 +512,7 @@ class LocalDatabase {
     for (let i = 6; i >= 0; i--) {
       const d = new Date();
       d.setDate(today.getDate() - i);
-      const dateStr = d.toISOString().split('T')[0];
+      const dateStr = toDateStr(d);
       const dayTasks = allTasks.filter(t => t.date === dateStr);
       const completed = dayTasks.filter(t => t.isCompleted).length;
       const total = dayTasks.length;
@@ -615,7 +616,7 @@ class CloudDatabase {
       user_id: t.userId,
       title: t.title,
       description: t.description ?? '',
-      date: t.date || new Date().toISOString().split('T')[0],
+      date: t.date || todayStr(),
       start_time: Number(t.startTime),
       end_time: Number(t.endTime),
       is_completed: Boolean(t.isCompleted),
@@ -769,7 +770,7 @@ function computeWeeklyAnalytics(allTasks) {
   for (let i = 6; i >= 0; i--) {
     const d = new Date();
     d.setDate(today.getDate() - i);
-    const dateStr = d.toISOString().split('T')[0];
+    const dateStr = toDateStr(d);
     const dayTasks = allTasks.filter((t) => t.date === dateStr);
     const completed = dayTasks.filter((t) => t.isCompleted).length;
     const total = dayTasks.length;
@@ -876,4 +877,55 @@ export async function seedDefaultRoutines(userId) {
   ];
   await cloudDb.addRoutine(defaults[0]);
   for (const r of defaults.slice(1)) await cloudDb.addRoutine(r);
+}
+
+const SAMPLE_TEMPLATE = [
+  { title: 'Morning Exercise & Meditation', start: '07:00', end: '08:00', category: 'Health' },
+  { title: 'Deep Work Session', start: '09:30', end: '12:00', category: 'Work' },
+  { title: 'Project Build & Code Review', start: '14:00', end: '17:00', category: 'Work' },
+  { title: 'Evening Reading & Reflection', start: '20:30', end: '21:30', category: 'Personal' }
+];
+
+/**
+ * Fill an account with a realistic week so the scheduler, routine and analytics
+ * screens all have something to show. Only writes what is missing.
+ */
+export async function seedSampleData(userId) {
+  const [tasks, routines] = await Promise.all([
+    db.getTasks(userId, null),
+    db.getRoutines(userId)
+  ]);
+
+  if (!routines.length) await seedDefaultRoutines(userId);
+
+  const seededDates = new Set(tasks.map((t) => t.date));
+  const now = Date.now();
+
+  for (let offset = -6; offset <= 0; offset++) {
+    const day = new Date();
+    day.setDate(day.getDate() + offset);
+    const y = day.getFullYear();
+    const m = day.getMonth();
+    const d = day.getDate();
+    const dateStr = toDateStr(day);
+    if (seededDates.has(dateStr)) continue;
+
+    for (const item of SAMPLE_TEMPLATE) {
+      const [sh, sm] = item.start.split(':').map(Number);
+      const [eh, em] = item.end.split(':').map(Number);
+      const startTime = new Date(y, m, d, sh, sm).getTime();
+      const endTime = new Date(y, m, d, eh, em).getTime();
+
+      await db.addTask({
+        userId,
+        title: item.title,
+        description: '',
+        date: dateStr,
+        startTime,
+        endTime,
+        category: item.category,
+        isCompleted: endTime < now
+      });
+    }
+  }
 }

@@ -1,6 +1,10 @@
 import React, { useState } from 'react';
 import { X, Lock, Mail, User, Sparkles, AlertCircle, ArrowRight, Check } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { seedSampleData } from '../db/database';
+
+const DEMO_EMAIL = 'cloudtest@daytoday.app';
+const DEMO_PASSWORD = 'TestPass1234';
 
 export default function AuthModal({ isOpen, onClose }) {
   const { login, signup, cloud } = useAuth();
@@ -12,6 +16,7 @@ export default function AuthModal({ isOpen, onClose }) {
   const [dailyGoalCount, setDailyGoalCount] = useState(5);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [demoLoading, setDemoLoading] = useState(false);
 
   if (!isOpen) return null;
 
@@ -42,6 +47,20 @@ export default function AuthModal({ isOpen, onClose }) {
   const handleContinueGuest = () => {
     setError('');
     onClose();
+  };
+
+  const handleDemoLogin = async () => {
+    setError('');
+    setDemoLoading(true);
+    try {
+      const signedIn = await login(DEMO_EMAIL, DEMO_PASSWORD);
+      await seedSampleData(signedIn.id);
+      onClose();
+    } catch (err) {
+      setError(err.message || 'Demo sign in failed.');
+    } finally {
+      setDemoLoading(false);
+    }
   };
 
   return (
@@ -171,6 +190,24 @@ export default function AuthModal({ isOpen, onClose }) {
             <ArrowRight className="w-4 h-4" />
           </button>
         </form>
+
+        {/* Reviewer demo: one click into a populated account */}
+        {cloud && (
+          <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10 space-y-2.5">
+            <p className="text-xs font-semibold text-white/80">Just looking? Use the demo account</p>
+            <p className="text-[11px] font-mono text-white/45 break-all">
+              {DEMO_EMAIL} &middot; {DEMO_PASSWORD}
+            </p>
+            <button
+              type="button"
+              onClick={handleDemoLogin}
+              disabled={loading || demoLoading}
+              className="w-full py-2 rounded-xl bg-accent-teal/15 hover:bg-accent-teal/25 border border-accent-teal/30 text-accent-teal text-xs font-semibold transition-colors disabled:opacity-50"
+            >
+              {demoLoading ? 'Preparing a week of sample data…' : 'Sign in with demo data'}
+            </button>
+          </div>
+        )}
 
         {/* Guest exploration */}
         <div className="pt-2 border-t border-white/10 text-center">
