@@ -40,33 +40,39 @@ function MainApp() {
 
   // Load Tasks for selected date
   const loadTasks = useCallback(async () => {
+    // Until the session is restored, currentUserId is the guest fallback of 1 while the
+    // gateway may already see a stored Supabase session and route to Postgres — which
+    // rejects `user_id = 1` because the column is a uuid. Three 400s on every cold load.
+    if (loading) return;
     try {
       const data = await db.getTasks(currentUserId, selectedDate);
       setTasks(data);
     } catch (err) {
       console.error('Failed to load tasks:', err);
     }
-  }, [currentUserId, selectedDate]);
+  }, [currentUserId, selectedDate, loading]);
 
   // Load Routines
   const loadRoutines = useCallback(async () => {
+    if (loading) return;
     try {
       const data = await db.getRoutines(currentUserId);
       setRoutineItems(data);
     } catch (err) {
       console.error('Failed to load routines:', err);
     }
-  }, [currentUserId]);
+  }, [currentUserId, loading]);
 
   // Load Weekly Analytics
   const loadAnalytics = useCallback(async () => {
+    if (loading) return;
     try {
       const data = await db.getWeeklyAnalytics(currentUserId);
       setWeeklyAnalytics(data);
     } catch (err) {
       console.error('Failed to load analytics:', err);
     }
-  }, [currentUserId]);
+  }, [currentUserId, loading]);
 
   // Refresh all data
   const refreshAll = useCallback(() => {
