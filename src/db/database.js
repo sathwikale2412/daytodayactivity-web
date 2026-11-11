@@ -799,30 +799,124 @@ const cloudDb = isSupabaseConfigured ? new CloudDatabase(supabase) : null;
 /**
  * Facade used by the rest of the app. Routes each call to Supabase when there
  * is an active session, otherwise to the on-device store (guest / dev mode).
+ * Employs automatic resilient fallback: if cloud operations encounter network,
+ * timeout, or database schema errors, operations fail open to local IndexedDB.
  */
 class DataGateway {
   async mode() {
     if (!cloudDb) return 'local';
-    const { data } = await supabase.auth.getSession();
-    return data.session ? 'cloud' : 'local';
+    try {
+      const { data } = await supabase.auth.getSession();
+      return data?.session ? 'cloud' : 'local';
+    } catch {
+      return 'local';
+    }
   }
 
-  async active() {
-    return (await this.mode()) === 'cloud' ? cloudDb : localDb;
+  async runWithFallback(actionName, cloudFn, localFn) {
+    const isCloud = (await this.mode()) === 'cloud';
+    if (isCloud && cloudDb) {
+      try {
+        return await cloudFn(cloudDb);
+      } catch (err) {
+        console.warn(`Cloud ${actionName} failed, seamlessly falling back to local IndexedDB store:`, err);
+      }
+    }
+    return await localFn(localDb);
   }
 
-  async getTasks(userId, dateStr = null) { return (await this.active()).getTasks(userId, dateStr); }
-  async getAllTasksForUser(userId) { return (await this.active()).getTasks(userId, null); }
-  async addTask(task) { return (await this.active()).addTask(task); }
-  async updateTask(task) { return (await this.active()).updateTask(task); }
-  async deleteTask(taskId) { return (await this.active()).deleteTask(taskId); }
+  async getTasks(userId, dateStr = null) {
+    return this.runWithFallback(
+      'getTasks',
+      (c) => c.getTasks(userId, dateStr),
+      (l) => l.getTasks(userId, dateStr)
+    );
+  }
+  async getAllTasksForUser(userId) {
+    return this.runWithFallback(
+      'getAllTasks',
+      (c) => c.getTasks(userId, null),
+      (l) => l.getTasks(userId, null)
+    );
+  }
+  async addTask(task) {
+    return this.runWithFallback(
+      'addTask',
+      async (c) => {
+        const res = await c.addTask(task);
+        try { await localDb.addTask(task); } catch {}
+        return res;
+      },
+      (l) => l.addTask(task)
+    );
+  }
+  async updateTask(task) {
+    return this.runWithFallback(
+      'updateTask',
+      async (c) => {
+        const res = await c.updateTask(task);
+        try { await localDb.updateTask(task); } catch {}
+        return res;
+      },
+      (l) => l.updateTask(task)
+    );
+  }
+  async deleteTask(taskId) {
+    return this.runWithFallback(
+      'deleteTask',
+      async (c) => {
+        const res = await c.deleteTask(taskId);
+        try { await localDb.deleteTask(taskId); } catch {}
+        return res;
+      },
+      (l) => l.deleteTask(taskId)
+    );
+  }
 
-  async getRoutines(userId) { return (await this.active()).getRoutines(userId); }
-  async addRoutine(routine) { return (await this.active()).addRoutine(routine); }
-  async deleteRoutine(routineId) { return (await this.active()).deleteRoutine(routineId); }
+  async getRoutines(userId) {
+    return this.runWithFallback(
+      'getRoutines',
+      (c) => c.getRoutines(userId),
+      (l) => l.getRoutines(userId)
+    );
+  }
+  async addRoutine(routine) {
+    return this.runWithFallback(
+      'addRoutine',
+      async (c) => {
+        const res = await c.addRoutine(routine);
+        try { await localDb.addRoutine(routine); } catch {}
+        return res;
+      },
+      (l) => l.addRoutine(routine)
+    );
+  }
+  async deleteRoutine(routineId) {
+    return this.runWithFallback(
+      'deleteRoutine',
+      async (c) => {
+        const res = await c.deleteRoutine(routineId);
+        try { await localDb.deleteRoutine(routineId); } catch {}
+        return res;
+      },
+      (l) => l.deleteRoutine(routineId)
+    );
+  }
 
-  async getProfile(userId) { return (await this.active()).getProfile(userId); }
-  async updateProfile(userId, data) { return (await this.active()).updateProfile(userId, data); }
+  async getProfile(userId) {
+    return this.runWithFallback(
+      'getProfile',
+      (c) => c.getProfile(userId),
+      (l) => l.getProfile(userId)
+    );
+  }
+  async updateProfile(userId, data) {
+    return this.runWithFallback(
+      'updateProfile',
+      (c) => c.updateProfile(userId, data),
+      (l) => l.updateProfile(userId, data)
+    );
+  }
 
   async getWeeklyAnalytics(userId) {
     const tasks = await this.getAllTasksForUser(userId);
@@ -865,9 +959,8 @@ class DataGateway {
 export const db = new DataGateway();
 export { LocalDatabase };
 
-// Seed default routines for a brand-new cloud user (mirrors local seeding).
+// Seed default routines for a brand-new user (both cloud & local).
 export async function seedDefaultRoutines(userId) {
-  if (!cloudDb) return;
   const defaults = [
     { userId, title: 'Morning Exercise & Meditation', startTimeHour: 7, startTimeMinute: 0, endTimeHour: 8, endTimeMinute: 0, category: 'Health' },
     { userId, title: 'Deep Work Session 1', startTimeHour: 9, startTimeMinute: 30, endTimeHour: 12, endTimeMinute: 0, category: 'Work' },
@@ -875,8 +968,20 @@ export async function seedDefaultRoutines(userId) {
     { userId, title: 'Project Focus & Code Review', startTimeHour: 14, startTimeMinute: 0, endTimeHour: 17, endTimeMinute: 0, category: 'Work' },
     { userId, title: 'Evening Reading & Reflection', startTimeHour: 20, startTimeMinute: 30, endTimeHour: 21, endTimeMinute: 30, category: 'Personal' }
   ];
-  await cloudDb.addRoutine(defaults[0]);
-  for (const r of defaults.slice(1)) await cloudDb.addRoutine(r);
+  try {
+    if (cloudDb) {
+      for (const r of defaults) {
+        await cloudDb.addRoutine(r);
+      }
+    }
+  } catch (err) {
+    console.warn('Cloud seed error, continuing with local seed:', err);
+  }
+  try {
+    for (const r of defaults) {
+      await localDb.addRoutine(r);
+    }
+  } catch {}
 }
 
 const SAMPLE_TEMPLATE = [
